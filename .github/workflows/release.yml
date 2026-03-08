@@ -29,8 +29,8 @@ jobs:
     runs-on: ubuntu-latest
     env:
       BINARY_NAME: tg
-      GOOS: linux
-      GOARCH: amd64
+      TARGET_OS: linux
+      TARGET_ARCHES: amd64 arm64
 
     steps:
       - name: Check out repository
@@ -101,7 +101,6 @@ jobs:
             echo "current=${current_version}"
             echo "version=${new_version}"
             echo "tag=${tag}"
-            echo "asset=${BINARY_NAME}_${new_version}_${GOOS}_${GOARCH}.tar.gz"
           } >> "${GITHUB_OUTPUT}"
 
       - name: Commit version bump and tag
@@ -115,12 +114,17 @@ jobs:
           CGO_ENABLED: "0"
         run: |
           mkdir -p dist
-          go build \
-            -trimpath \
-            -ldflags="-s -w -X main.version=${{ steps.version.outputs.tag }}" \
-            -o "dist/${BINARY_NAME}" \
-            .
-          tar -C dist -czf "dist/${{ steps.version.outputs.asset }}" "${BINARY_NAME}"
+          for arch in ${TARGET_ARCHES}; do
+            build_dir="dist/${TARGET_OS}_${arch}"
+            asset="${BINARY_NAME}_${{ steps.version.outputs.version }}_${TARGET_OS}_${arch}.tar.gz"
+            mkdir -p "${build_dir}"
+            GOOS="${TARGET_OS}" GOARCH="${arch}" go build \
+              -trimpath \
+              -ldflags="-s -w -X main.version=${{ steps.version.outputs.tag }}" \
+              -o "${build_dir}/${BINARY_NAME}" \
+              .
+            tar -C "${build_dir}" -czf "dist/${asset}" "${BINARY_NAME}"
+          done
 
       - name: Push commit and tag
         run: |
@@ -131,6 +135,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${{ steps.version.outputs.tag }}" "dist/${{ steps.version.outputs.asset }}" \
+          gh release create "${{ steps.version.outputs.tag }}" dist/*.tar.gz \
             --title "${{ steps.version.outputs.tag }}" \
             --notes "Release ${{ steps.version.outputs.tag }}"
