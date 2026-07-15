@@ -29,8 +29,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       BINARY_NAME: tg
-      TARGET_OS: linux
-      TARGET_ARCHES: amd64 arm64
+      TARGETS: linux/amd64 linux/arm64 windows/386
 
     steps:
       - name: Check out repository
@@ -109,21 +108,35 @@ jobs:
           git commit -m "release: ${{ steps.version.outputs.tag }}"
           git tag "${{ steps.version.outputs.tag }}"
 
-      - name: Build release artifact
+      - name: Build release artifacts
         env:
           CGO_ENABLED: "0"
         run: |
           mkdir -p dist
-          for arch in ${TARGET_ARCHES}; do
-            build_dir="dist/${TARGET_OS}_${arch}"
-            asset="${BINARY_NAME}_${{ steps.version.outputs.version }}_${TARGET_OS}_${arch}.tar.gz"
+          for target in ${TARGETS}; do
+            os="${target%/*}"
+            arch="${target#*/}"
+            build_dir="dist/${os}_${arch}"
             mkdir -p "${build_dir}"
-            GOOS="${TARGET_OS}" GOARCH="${arch}" go build \
+
+            if [[ "${os}" == "windows" ]]; then
+              binary="${BINARY_NAME}.exe"
+            else
+              binary="${BINARY_NAME}"
+            fi
+
+            GOOS="${os}" GOARCH="${arch}" go build \
               -trimpath \
               -ldflags="-s -w -X main.version=${{ steps.version.outputs.tag }}" \
-              -o "${build_dir}/${BINARY_NAME}" \
+              -o "${build_dir}/${binary}" \
               .
-            tar -C "${build_dir}" -czf "dist/${asset}" "${BINARY_NAME}"
+
+            asset="${BINARY_NAME}_${{ steps.version.outputs.version }}_${os}_${arch}"
+            if [[ "${os}" == "windows" ]]; then
+              zip -j "dist/${asset}.zip" "${build_dir}/${binary}"
+            else
+              tar -C "${build_dir}" -czf "dist/${asset}.tar.gz" "${binary}"
+            fi
           done
 
       - name: Push commit and tag
@@ -135,6 +148,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${{ steps.version.outputs.tag }}" dist/*.tar.gz \
+          gh release create "${{ steps.version.outputs.tag }}" dist/*.tar.gz dist/*.zip \
             --title "${{ steps.version.outputs.tag }}" \
             --notes "Release ${{ steps.version.outputs.tag }}"
